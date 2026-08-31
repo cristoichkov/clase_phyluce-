@@ -2,67 +2,93 @@
 
 ## Objetivo
 
-En esta práctica seguiremos paso a paso un flujo de trabajo para procesar datos de **elementos ultraconservados (UCEs)** con PHYLUCE.
+Esta práctica tiene dos partes claramente separadas.
 
-La primera parte está diseñada para comprender qué ocurre con **una muestra individual**:
+### Parte I. Procesamiento de una muestra
 
-1. seleccionar una muestra;
-2. copiar los FASTQ;
-3. limpiar los reads con `fastp`;
-4. ensamblar los reads con SPAdes mediante PHYLUCE;
-5. identificar UCEs comparando los contigs contra los probes;
-6. extraer las regiones UCE recuperadas.
+Primero procesaremos **una sola muestra paso a paso** para comprender qué hace cada programa y qué archivos produce PHYLUCE.
 
-Después utilizaremos **todas las muestras juntas** para mostrar la lógica filogenómica:
-
-7. ensamblar cada muestra;
-8. reunir sus contigs;
-9. identificar UCEs de todas las muestras en una base común;
-10. determinar qué loci están presentes en cada muestra;
-11. extraer las secuencias de los loci;
-12. alinear las secuencias **por locus UCE** con MAFFT.
-
-Finalmente se incluyen dos scripts generales:
+Seguiremos:
 
 ```text
-01_clean_reads.slurm
-02_phyluce_all.slurm
+FASTQ
+  │
+  ▼
+fastp
+  │
+  ▼
+reads limpios
+  │
+  ▼
+SPAdes
+  │
+  ▼
+contigs
+  │
+  ▼
+probes + LASTZ
+  │
+  ▼
+UCEs identificados
+  │
+  ▼
+secuencias UCE de una muestra
 ```
 
-Estos scripts leen una lista de muestras desde:
+### Parte II. Pipeline global
+
+Una vez entendido el procedimiento, ejecutaremos un análisis automatizado con **todas las muestras**.
+
+El pipeline global leerá:
 
 ```text
-samples.txt
+metadata/config.sh
+metadata/samples.txt
 ```
 
-Por lo tanto, el mismo flujo puede reutilizarse con otras muestras siempre que los FASTQ sigan el patrón:
+y ejecutará:
 
 ```text
-MUESTRA_1.fastq.gz
-MUESTRA_2.fastq.gz
+limpieza
+   │
+   ▼
+ensamblaje por muestra
+   │
+   ▼
+contigs de todas las muestras
+   │
+   ▼
+búsqueda de UCEs
+   │
+   ▼
+matriz muestra × locus
+   │
+   ▼
+extracción de secuencias
+   │
+   ▼
+alineamiento por locus
 ```
 
 ---
 
 # Datos utilizados
 
-Las muestras pertenecen al proyecto:
+Trabajaremos con cuatro corridas del proyecto:
 
 **Ultraconserved element phylogenomics reveals novel insights into the historical biogeography of euophryine jumping spiders (Araneae: Salticidae)**
 
-- BioProject: `PRJNA1506394`
-- SRA Study: `SRP725708`
+- **BioProject:** `PRJNA1506394`
+- **SRA Study:** `SRP725708`
 
-Las cuatro corridas utilizadas durante la práctica son:
+| SRA Run | SRA Experiment |
+|---|---|
+| `SRR40095305` | `SRX34736494` |
+| `SRR40095304` | `SRX34736495` |
+| `SRR40095292` | `SRX34736507` |
+| `SRR40095270` | `SRX34736529` |
 
-| Muestra | SRA Experiment | Uso |
-|---|---|---|
-| `SRR40095305` | `SRX34736494` | práctica |
-| `SRR40095304` | `SRX34736495` | práctica |
-| `SRR40095292` | `SRX34736507` | práctica |
-| `SRR40095270` | `SRX34736529` | práctica |
-
-Los metadatos de las bibliotecas indican:
+Características generales:
 
 ```text
 Strategy:   Targeted-Capture
@@ -75,11 +101,11 @@ Instrument: Illumina NovaSeq 6000
 
 ---
 
-# Datos preparados para clase
+# Datos preparados para la clase
 
 Los FASTQ originales contienen varios millones de reads.
 
-Para reducir el tiempo de cómputo durante la práctica se preparó un subconjunto de:
+Para reducir el tiempo de cómputo se preparó previamente un subconjunto de:
 
 ```text
 500,000 reads R1
@@ -107,69 +133,25 @@ SRR40095305_1.fastq.gz
 SRR40095305_2.fastq.gz
 ```
 
-> El subsampling se utiliza con fines docentes. En un análisis real debe evaluarse si reducir la cobertura es apropiado, porque puede reducir el número de loci recuperados.
-
----
-
-# Flujo general
-
-```text
-FASTQ paired-end
-       │
-       ▼
-     fastp
-       │
-       ▼
-Reads limpios
-       │
-       ▼
-SPAdes mediante PHYLUCE
-       │
-       ▼
-Contigs por muestra
-       │
-       ▼
-Probes UCE
-       │
-       ▼
-LASTZ
-       │
-       ▼
-probe.matches.sqlite
-       │
-       ▼
-Matriz muestra × locus
-       │
-       ▼
-Extracción de secuencias UCE
-       │
-       ▼
-FASTA con todas las muestras
-       │
-       ▼
-MAFFT por locus
-       │
-       ▼
-un alineamiento por UCE
-```
+> El subsampling se utiliza aquí con fines docentes. En un análisis de investigación debe evaluarse si reducir la cobertura es apropiado, ya que puede disminuir el número de loci recuperados.
 
 ---
 
 # PARTE I. Procesamiento paso a paso de una muestra
 
-La primera parte de la práctica se realiza con **una sola muestra** para observar claramente qué produce cada etapa.
+Esta primera parte se realiza con **una sola muestra** para observar claramente qué ocurre en cada etapa.
 
 ---
 
 # 1. Crear el proyecto
 
 ```bash
-mkdir -p phyluce_uce/{data/raw-fastq,data/clean-fastq,data/probes,out,bin,metadata,logs,containers}
+mkdir -p phyluce_uce/{data/raw-fastq,data/clean-fastq,data/probes,out,bin,metadata,logs}
 
 cd phyluce_uce
 ```
 
-Estructura:
+La estructura será:
 
 ```text
 phyluce_uce/
@@ -180,45 +162,40 @@ phyluce_uce/
 ├── out/
 ├── bin/
 ├── metadata/
-├── logs/
-└── containers/
+└── logs/
 ```
 
 ---
 
-# 2. Preparar los contenedores
+# 2. Definir las rutas de los contenedores
 
-Los contenedores compartidos se encuentran en:
+Los contenedores están disponibles en:
 
 ```text
 /srv/bishop/phylogenomics/contenedores/
 ```
 
-Creamos enlaces simbólicos para los contenedores:
+Definimos:
 
 ```bash
-ln -s \
-/srv/bishop/phylogenomics/contenedores/fastp_1.3.6.sif \
-containers/fastp_1.3.6.sif
-```
+FASTP_CONTAINER="/srv/bishop/phylogenomics/contenedores/fastp_1.3.6.sif"
 
-```bash
-ln -s \
-/srv/bishop/phylogenomics/contenedores/phyluce_1.6.8.sif \
-containers/phyluce_1.6.8.sif
+PHYLUCE_CONTAINER="/srv/bishop/phylogenomics/contenedores/phyluce_1.6.8.sif"
 ```
 
 Comprobamos:
 
 ```bash
-ls -lh containers/
+ls -lh ${FASTP_CONTAINER}
+```
+
+```bash
+ls -lh ${PHYLUCE_CONTAINER}
 ```
 
 ---
 
 # 3. Seleccionar una muestra
-
-Cada estudiante trabajará inicialmente con una sola accesión.
 
 Por ejemplo:
 
@@ -240,7 +217,7 @@ Comprobamos:
 echo ${ID}
 ```
 
-> La variable `ID` existe solamente en la terminal actual. Si abre una nueva terminal deberá definirla nuevamente.
+> Si se abre una nueva terminal será necesario volver a definir la variable `ID`.
 
 ---
 
@@ -270,13 +247,13 @@ ${ID}_2.fastq.gz
 
 # 5. Revisar los FASTQ
 
-Observar los primeros registros:
+Podemos observar las primeras secuencias:
 
 ```bash
 zcat data/raw-fastq/${ID}_1.fastq.gz | head
 ```
 
-Un registro FASTQ contiene cuatro líneas:
+Cada registro FASTQ contiene cuatro líneas:
 
 ```text
 @identificador
@@ -309,7 +286,7 @@ en ambos archivos.
 
 # 6. Limpieza con fastp
 
-El objetivo de `fastp` es producir reads limpios antes del ensamblaje.
+Conceptualmente:
 
 ```text
 FASTQ
@@ -327,7 +304,7 @@ Creamos:
 mkdir -p out/fastp-report
 ```
 
-## Script `bin/fastp.slurm`
+Creamos el script:
 
 ```bash
 nano bin/fastp.slurm
@@ -352,14 +329,15 @@ cd "${SLURM_SUBMIT_DIR}"
 
 ID=$1
 
-CONTAINER="containers/fastp_1.3.6.sif"
+FASTP_CONTAINER="/srv/bishop/phylogenomics/contenedores/fastp_1.3.6.sif"
+
 INPUT="data/raw-fastq"
 OUTDIR="data/clean-fastq/${ID}"
 REPORT="out/fastp-report"
 
 mkdir -p "${OUTDIR}" "${REPORT}"
 
-apptainer exec ${CONTAINER} \
+apptainer exec ${FASTP_CONTAINER} \
     fastp \
     -i ${INPUT}/${ID}_1.fastq.gz \
     -I ${INPUT}/${ID}_2.fastq.gz \
@@ -399,9 +377,9 @@ ${ID}-READ2.fastq.gz
 
 ---
 
-# 7. ¿Por qué cambiamos READ1 y READ2?
+# 7. ¿Por qué READ1 y READ2?
 
-Los FASTQ originales tienen:
+Los archivos originales tienen:
 
 ```text
 ${ID}_1.fastq.gz
@@ -415,13 +393,18 @@ ${ID}-READ1.fastq.gz
 ${ID}-READ2.fastq.gz
 ```
 
-Esto permite que el wrapper de ensamblaje de PHYLUCE reconozca correctamente los mates.
+Esto facilita que el wrapper de PHYLUCE reconozca los mates.
 
 ---
 
 # 8. Crear `assembly.conf`
 
-PHYLUCE necesita conocer qué muestra debe ensamblar y dónde están sus reads.
+PHYLUCE necesita conocer:
+
+1. el nombre de la muestra;
+2. el directorio donde están los reads limpios.
+
+Creamos:
 
 ```bash
 printf "[samples]\n%s:%s/data/clean-fastq/%s\n" \
@@ -444,15 +427,15 @@ SRR40095305:/srv/bishop/phylogenomics/phylogen20/phyluce_uce/data/clean-fastq/SR
 
 ---
 
-# 9. Configurar la memoria de SPAdes
+# 9. Configurar SPAdes
 
-PHYLUCE 1.6.8 lee opciones de SPAdes desde:
+PHYLUCE 1.6.8 utiliza:
 
 ```text
 ~/.phyluce.conf
 ```
 
-Para los datos reducidos de esta práctica utilizamos:
+Para los datos de clase utilizamos:
 
 ```ini
 [spades]
@@ -474,29 +457,31 @@ Comprobamos:
 cat ~/.phyluce.conf
 ```
 
-> Si el archivo ya existe, revise su contenido antes de modificarlo.
-
 ---
 
-# 10. Ensamblar la muestra con SPAdes
+# 10. Ensamblar con SPAdes
 
-El ensamblaje transforma millones de reads cortos en secuencias más largas llamadas **contigs**.
+PHYLUCE utiliza:
 
 ```text
-reads
- │
- ├─────────────┐
- ▼             ▼
-fragmentos solapantes
-       │
-       ▼
-     SPAdes
-       │
-       ▼
-     contigs
+phyluce_assembly_assemblo_spades
 ```
 
-## Script `bin/spades.slurm`
+para ejecutar SPAdes.
+
+Conceptualmente:
+
+```text
+reads cortos
+     │
+     ▼
+   SPAdes
+     │
+     ▼
+   contigs
+```
+
+Creamos:
 
 ```bash
 nano bin/spades.slurm
@@ -519,9 +504,9 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
 
-CONTAINER="containers/phyluce_1.6.8.sif"
+PHYLUCE_CONTAINER="/srv/bishop/phylogenomics/contenedores/phyluce_1.6.8.sif"
 
-apptainer exec ${CONTAINER} \
+apptainer exec ${PHYLUCE_CONTAINER} \
     phyluce_assembly_assemblo_spades \
     --config metadata/assembly.conf \
     --output out/spades-assemblies \
@@ -535,12 +520,6 @@ Ejecutamos:
 sbatch bin/spades.slurm
 ```
 
-Revisamos:
-
-```bash
-squeue -u $USER
-```
-
 ---
 
 # 11. Revisar los contigs
@@ -551,13 +530,13 @@ Cuando termine:
 ls -lh out/spades-assemblies/contigs/
 ```
 
-PHYLUCE crea un FASTA de contigs asociado a la muestra:
+PHYLUCE crea:
 
 ```text
 ${ID}.contigs.fasta
 ```
 
-Comprobamos que el archivo exista:
+Comprobamos que el ensamblaje sea válido:
 
 ```bash
 test -s out/spades-assemblies/${ID}_spades/contigs.fasta \
@@ -577,27 +556,19 @@ Contamos:
 grep -c "^>" ${CONTIGS}
 ```
 
-Cada `>` corresponde a un contig ensamblado.
+Cada `>` corresponde a un contig.
 
 ---
 
-# 12. Preparar los probes UCE
-
-Los probes disponibles para esta práctica están en:
-
-```text
-/srv/bishop/phylogenomics/data/spiders/
-```
+# 12. Preparar los probes
 
 Utilizaremos:
 
 ```text
-RTA-v3-probe-combine-spider-color-DUPE-SCREENED.fasta
+/srv/bishop/phylogenomics/data/spiders/RTA-v3-probe-combine-spider-color-DUPE-SCREENED.fasta
 ```
 
-## Importante: copiar, no enlazar
-
-Copiaremos físicamente el archivo al proyecto:
+Los copiamos al proyecto:
 
 ```bash
 cp \
@@ -605,7 +576,7 @@ cp \
 data/probes/RTA-v3-probes.fasta
 ```
 
-Esto evita problemas con enlaces simbólicos que apuntan fuera del directorio visible para Apptainer.
+> Se utiliza `cp` y no un enlace simbólico porque durante las pruebas el symlink era visible desde el host pero no podía resolverse correctamente dentro del contenedor Apptainer.
 
 Comprobamos desde el host:
 
@@ -613,18 +584,16 @@ Comprobamos desde el host:
 ls -lh data/probes/RTA-v3-probes.fasta
 ```
 
-Y desde el contenedor:
+Y desde Apptainer:
 
 ```bash
-apptainer exec containers/phyluce_1.6.8.sif \
+apptainer exec ${PHYLUCE_CONTAINER} \
     ls -lh data/probes/RTA-v3-probes.fasta
 ```
 
 ---
 
-# 13. Entender los nombres de los probes
-
-Revisamos:
+# 13. Revisar los encabezados de los probes
 
 ```bash
 grep "^>" data/probes/RTA-v3-probes.fasta | head
@@ -655,7 +624,7 @@ uce-1006_p3
    uce-1006
 ```
 
-Varios probes pueden pertenecer al mismo locus UCE.
+Varios probes corresponden al mismo locus UCE.
 
 ---
 
@@ -667,21 +636,9 @@ PHYLUCE utiliza:
 phyluce_assembly_match_contigs_to_probes
 ```
 
-y realiza las comparaciones mediante **LASTZ**.
+y realiza la comparación mediante LASTZ.
 
-```text
-contigs de la muestra
-          +
-      probes UCE
-          │
-          ▼
-        LASTZ
-          │
-          ▼
-UCEs identificados
-```
-
-## Script `bin/uce_search.slurm`
+Creamos:
 
 ```bash
 nano bin/uce_search.slurm
@@ -704,10 +661,11 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR}"
 
-CONTAINER="containers/phyluce_1.6.8.sif"
+PHYLUCE_CONTAINER="/srv/bishop/phylogenomics/contenedores/phyluce_1.6.8.sif"
+
 PROBES="data/probes/RTA-v3-probes.fasta"
 
-apptainer exec ${CONTAINER} \
+apptainer exec ${PHYLUCE_CONTAINER} \
     phyluce_assembly_match_contigs_to_probes \
     --contigs out/spades-assemblies/contigs \
     --probes ${PROBES} \
@@ -729,7 +687,7 @@ sbatch bin/uce_search.slurm
 
 ---
 
-# 15. Revisar la búsqueda de UCEs
+# 15. Revisar los matches
 
 ```bash
 ls -lh out/uce-search/
@@ -742,21 +700,13 @@ probe.matches.sqlite
 ${ID}.contigs.lastz
 ```
 
-El archivo:
-
-```text
-probe.matches.sqlite
-```
-
-es una base de datos que almacena qué UCE fue identificado en qué contig y en qué muestra.
-
-Podemos revisar el resumen:
+Podemos revisar:
 
 ```bash
 grep -Ri "unique\|match" logs/ | tail -n 20
 ```
 
-En una ejecución con `SRR40095305` se obtuvo:
+Para `SRR40095305` se obtuvo:
 
 ```text
 SRR40095305: 3145 (11.33%) uniques of 27752 contigs,
@@ -765,7 +715,17 @@ SRR40095305: 3145 (11.33%) uniques of 27752 contigs,
 53 contigs removed for matching multiple UCE loci
 ```
 
-Esto significa que PHYLUCE retuvo **3,145 asociaciones no ambiguas entre contigs y loci UCE**.
+Interpretación:
+
+```text
+27752 contigs
+      │
+      ▼
+comparación contra probes
+      │
+      ▼
+3145 asociaciones UCE no ambiguas
+```
 
 ---
 
@@ -784,14 +744,16 @@ Revisamos:
 cat metadata/taxon-set.conf
 ```
 
-Para una sola muestra podemos obtener los loci con:
+Creamos:
 
 ```bash
-mkdir -p out/loci/log
+mkdir -p out/loci
 ```
 
+Obtenemos los loci:
+
 ```bash
-apptainer exec containers/phyluce_1.6.8.sif \
+apptainer exec ${PHYLUCE_CONTAINER} \
     phyluce_assembly_get_match_counts \
     --locus-db out/uce-search/probe.matches.sqlite \
     --taxon-list-config metadata/taxon-set.conf \
@@ -802,7 +764,7 @@ apptainer exec containers/phyluce_1.6.8.sif \
 Extraemos las secuencias:
 
 ```bash
-apptainer exec containers/phyluce_1.6.8.sif \
+apptainer exec ${PHYLUCE_CONTAINER} \
     phyluce_assembly_get_fastas_from_match_counts \
     --contigs out/spades-assemblies/contigs \
     --locus-db out/uce-search/probe.matches.sqlite \
@@ -816,7 +778,7 @@ Contamos:
 grep -c "^>" out/loci/${ID}-uce-loci.fasta
 ```
 
-Ejemplo para `SRR40095305`:
+Para `SRR40095305` obtuvimos:
 
 ```text
 3145
@@ -825,8 +787,6 @@ Ejemplo para `SRR40095305`:
 ---
 
 # 17. ¿Qué representa cada secuencia?
-
-Revisamos:
 
 ```bash
 grep "^>" out/loci/${ID}-uce-loci.fasta | head
@@ -840,29 +800,25 @@ Ejemplo:
 >uce-20003818_SRR40095305 |uce-20003818
 ```
 
-Cada registro corresponde a un **locus UCE diferente** recuperado para la muestra.
+Cada registro corresponde a un **locus UCE diferente** recuperado para esa muestra.
 
 Por ejemplo:
 
 ```text
 uce-2413
-    │
-    └── secuencia recuperada en SRR40095305
+   │
+   └── secuencia recuperada de SRR40095305
 ```
 
-Una secuencia recuperada puede contener el núcleo ultraconservado y regiones flanqueantes.
-
-Estas regiones flanqueantes suelen presentar mayor variación y pueden aportar información filogenética.
+Una secuencia puede incluir tanto el núcleo ultraconservado como regiones flanqueantes más variables.
 
 ---
 
-# PARTE II. De una muestra a un análisis filogenómico
+# PARTE II. Pipeline global con todas las muestras
 
-Hasta ahora trabajamos con una sola muestra para observar el proceso.
+Ya conocemos qué ocurre con una muestra.
 
-Sin embargo, para realizar un análisis filogenómico necesitamos comparar **el mismo locus entre varias muestras**.
-
-Con cuatro muestras:
+Ahora procesaremos automáticamente:
 
 ```text
 SRR40095305
@@ -871,97 +827,128 @@ SRR40095292
 SRR40095270
 ```
 
-cada una se ensambla de manera independiente:
+La lógica será:
 
 ```text
-SRR40095305 → SPAdes → contigs
-SRR40095304 → SPAdes → contigs
-SRR40095292 → SPAdes → contigs
-SRR40095270 → SPAdes → contigs
+cada muestra
+FASTQ
+  │
+  ▼
+fastp
+  │
+  ▼
+SPAdes
+  │
+  ▼
+contigs
+  │
+  ├───────────────┐
+  │               │
+  ▼               ▼
+contigs muestra 1
+contigs muestra 2
+contigs muestra 3
+contigs muestra 4
+        │
+        ▼
+PHYLUCE + probes
+        │
+        ▼
+probe.matches.sqlite
+        │
+        ▼
+matriz muestra × locus
+        │
+        ▼
+secuencias UCE
+        │
+        ▼
+alineamiento por locus
 ```
-
-Después PHYLUCE trabaja sobre el directorio que contiene los contigs de todas las muestras:
-
-```text
-spades-assemblies/
-└── contigs/
-    ├── SRR40095305.contigs.fasta
-    ├── SRR40095304.contigs.fasta
-    ├── SRR40095292.contigs.fasta
-    └── SRR40095270.contigs.fasta
-```
-
-Entonces ejecutamos **una sola búsqueda de probes contra el conjunto completo de contigs**.
-
-El resultado permite construir relaciones como:
-
-```text
-uce-2413
-├── SRR40095305
-├── SRR40095304
-├── SRR40095292
-└── SRR40095270
-
-uce-9410
-├── SRR40095305
-├── SRR40095304
-└── SRR40095270
-
-uce-5435
-├── SRR40095305
-├── SRR40095292
-└── SRR40095270
-```
-
-No todos los loci tienen que estar presentes en todas las muestras.
 
 ---
 
-# 18. Matriz completa e incompleta
+# 18. Crear el proyecto global
 
-Una **matriz completa** conserva únicamente loci presentes en todas las muestras.
+```bash
+mkdir -p phyluce_global/{bin,metadata,data/clean-fastq,data/probes,out,logs}
 
-Por ejemplo:
-
-```text
-                uce-1   uce-2   uce-3
-muestra A         ✓       ✓       ✓
-muestra B         ✓       ✓       ✓
-muestra C         ✓       ✓       ✓
-muestra D         ✓       ✓       ✓
+cd phyluce_global
 ```
 
-Una **matriz incompleta** permite ausencia de algunos loci:
+La estructura será:
 
 ```text
-                uce-1   uce-2   uce-3
-muestra A         ✓       ✓       ✓
-muestra B         ✓       -       ✓
-muestra C         ✓       ✓       ✓
-muestra D         -       ✓       ✓
+phyluce_global/
+├── README.md
+├── bin/
+│   ├── 01_clean_reads.slurm
+│   └── 02_phyluce_all.slurm
+├── metadata/
+│   ├── config.sh
+│   └── samples.txt
+├── data/
+│   ├── clean-fastq/
+│   └── probes/
+├── out/
+└── logs/
 ```
-
-Para un primer análisis con PHYLUCE utilizaremos:
-
-```text
---incomplete-matrix
-```
-
-porque permite recuperar y alinear loci aunque no estén presentes en las cuatro muestras.
-
-La completitud de la matriz puede filtrarse posteriormente.
 
 ---
 
-# 19. Crear una lista de muestras
+# 19. Archivo de configuración
 
-Para automatizar el flujo utilizaremos:
+Todo el pipeline global lee:
 
 ```text
-samples.txt
+metadata/config.sh
 ```
 
-Contenido:
+Aquí concentramos las rutas y parámetros.
+
+Ejemplo:
+
+```bash
+SAMPLE_LIST="metadata/samples.txt"
+
+RAW_SOURCE_DIR="/srv/bishop/phylogenomics/data/class-fastq"
+
+CONTAINER_DIR="/srv/bishop/phylogenomics/contenedores"
+
+FASTP_CONTAINER="${CONTAINER_DIR}/fastp_1.3.6.sif"
+
+PHYLUCE_CONTAINER="${CONTAINER_DIR}/phyluce_1.6.8.sif"
+
+PROBES_SOURCE="/srv/bishop/phylogenomics/data/spiders/RTA-v3-probe-combine-spider-color-DUPE-SCREENED.fasta"
+
+CLEAN_DIR="data/clean-fastq"
+
+PROBES_DIR="data/probes"
+
+FASTP_REPORT_DIR="out/fastp-report"
+
+GLOBAL_DIR="out/global"
+
+LOG_DIR="logs"
+
+FASTP_Q=20
+
+SPADES_MAX_MEMORY=8
+```
+
+Así no es necesario modificar los scripts cuando cambian las rutas.
+
+---
+
+# 20. Lista de muestras
+
+El archivo:
+
+```text
+metadata/samples.txt
+```
+
+contiene:
 
 ```text
 SRR40095305
@@ -970,86 +957,66 @@ SRR40095292
 SRR40095270
 ```
 
-La idea es que el pipeline no dependa de estas cuatro muestras en particular.
-
-Un usuario puede reemplazar el contenido por sus propias muestras:
+Cada identificador debe corresponder a:
 
 ```text
-muestra_01
-muestra_02
-muestra_03
-muestra_04
-muestra_05
+ID_1.fastq.gz
+ID_2.fastq.gz
 ```
 
-siempre que existan:
+en:
 
 ```text
-muestra_01_1.fastq.gz
-muestra_01_2.fastq.gz
+RAW_SOURCE_DIR
 ```
 
-etc.
-
-También se permiten líneas vacías y líneas que comienzan con `#`.
+Para otro proyecto basta con sustituir esta lista.
 
 ---
 
-# PARTE III. Pipeline global
+# 21. Script global de limpieza
 
-Para análisis repetibles separaremos dos procesos:
-
-```text
-1. limpieza de reads
-2. PHYLUCE
-```
-
-Esto permite revisar los reads limpios antes de comenzar el ensamblaje.
-
-Los scripts incluidos son:
+El primer script es:
 
 ```text
-01_clean_reads.slurm
-02_phyluce_all.slurm
+bin/01_clean_reads.slurm
 ```
 
----
+Ejecutamos:
 
-# 20. Script global de limpieza
+```bash
+sbatch bin/01_clean_reads.slurm
+```
 
 El script:
 
 ```text
-01_clean_reads.slurm
-```
-
-lee cada identificador de:
-
-```text
+config.sh
+   +
 samples.txt
+   │
+   ▼
+lee muestra 1
+lee muestra 2
+lee muestra 3
+lee muestra 4
+   │
+   ▼
+fastp
+   │
+   ▼
+data/clean-fastq/
 ```
 
-y ejecuta `fastp`.
-
-Uso:
-
-```bash
-sbatch bin/01_clean_reads.slurm metadata/samples.txt
-```
-
-El script espera encontrar:
+Las salidas tendrán:
 
 ```text
-data/raw-fastq/ID_1.fastq.gz
-data/raw-fastq/ID_2.fastq.gz
+data/clean-fastq/SRR40095305/
+├── SRR40095305-READ1.fastq.gz
+└── SRR40095305-READ2.fastq.gz
 ```
 
-y produce:
-
-```text
-data/clean-fastq/ID/ID-READ1.fastq.gz
-data/clean-fastq/ID/ID-READ2.fastq.gz
-```
+y lo mismo para las demás muestras.
 
 Los reportes quedan en:
 
@@ -1057,137 +1024,48 @@ Los reportes quedan en:
 out/fastp-report/
 ```
 
-Si una muestra ya tiene ambos FASTQ limpios, el script la omite.
-
----
-
-# 21. Copiar las cuatro muestras de la práctica
-
-Antes de ejecutar el script global de limpieza podemos copiar todas las muestras listadas:
-
-```bash
-while read -r ID
-do
-    [[ -z "${ID}" || "${ID}" =~ ^# ]] && continue
-
-    cp \
-    /srv/bishop/phylogenomics/data/class-fastq/${ID}_1.fastq.gz \
-    /srv/bishop/phylogenomics/data/class-fastq/${ID}_2.fastq.gz \
-    data/raw-fastq/
-done < metadata/samples.txt
-```
-
-Comprobamos:
-
-```bash
-ls -lh data/raw-fastq/
-```
-
----
-
-# 22. Ejecutar la limpieza global
-
-```bash
-sbatch bin/01_clean_reads.slurm metadata/samples.txt
-```
-
-Revisamos:
+Podemos monitorear:
 
 ```bash
 squeue -u $USER
 ```
 
-Cuando termine:
+---
+
+# 22. Script global de PHYLUCE
+
+Cuando la limpieza termine:
 
 ```bash
-find data/clean-fastq -type f | sort
+sbatch bin/02_phyluce_all.slurm
+```
+
+Este script comienza con los reads limpios y ejecuta:
+
+```text
+1. crear assembly-all.conf
+2. ensamblar cada muestra con SPAdes
+3. reunir los contigs
+4. copiar los probes
+5. comparar contigs contra probes
+6. crear probe.matches.sqlite
+7. crear taxon-set-all.conf
+8. obtener matriz muestra × locus
+9. extraer las secuencias UCE
+10. alinear cada locus con MAFFT
 ```
 
 ---
 
-# 23. Script global de PHYLUCE
+# 23. `assembly-all.conf`
 
-El segundo script:
-
-```text
-02_phyluce_all.slurm
-```
-
-parte de los FASTQ ya limpios.
-
-Realiza automáticamente:
-
-```text
-samples.txt
-    │
-    ▼
-crear assembly-all.conf
-    │
-    ▼
-SPAdes para cada muestra
-    │
-    ▼
-contigs de todas las muestras
-    │
-    ▼
-copiar probes
-    │
-    ▼
-match_contigs_to_probes
-    │
-    ▼
-probe.matches.sqlite
-    │
-    ▼
-crear taxon-set-all.conf
-    │
-    ▼
-get_match_counts
-    │
-    ▼
-get_fastas_from_match_counts
-    │
-    ▼
-all-uce-loci.fasta
-    │
-    ▼
-MAFFT por locus
-    │
-    ▼
-un FASTA alineado por cada UCE
-```
-
-Uso para las muestras de la práctica:
-
-```bash
-sbatch bin/02_phyluce_all.slurm metadata/samples.txt
-```
-
-También puede especificarse otro archivo de probes:
-
-```bash
-sbatch bin/02_phyluce_all.slurm \
-    metadata/samples.txt \
-    /ruta/a/mis-probes.fasta
-```
-
-Si no se proporciona un segundo argumento, utiliza por defecto:
-
-```text
-/srv/bishop/phylogenomics/data/spiders/RTA-v3-probe-combine-spider-color-DUPE-SCREENED.fasta
-```
-
----
-
-# 24. `assembly-all.conf`
-
-El pipeline genera automáticamente:
+Se genera automáticamente:
 
 ```text
 metadata/assembly-all.conf
 ```
 
-Con las cuatro muestras tendrá una estructura semejante a:
+Ejemplo:
 
 ```ini
 [samples]
@@ -1197,19 +1075,13 @@ SRR40095292:/ruta/proyecto/data/clean-fastq/SRR40095292
 SRR40095270:/ruta/proyecto/data/clean-fastq/SRR40095270
 ```
 
-PHYLUCE recorre estas muestras y ensambla cada una de manera independiente.
+Cada muestra se ensambla de forma independiente.
 
 ---
 
-# 25. Contigs de todas las muestras
+# 24. Contigs de todas las muestras
 
-El pipeline global utiliza:
-
-```text
-out/global/spades-assemblies/
-```
-
-y produce:
+Después de SPAdes:
 
 ```text
 out/global/spades-assemblies/contigs/
@@ -1219,23 +1091,19 @@ out/global/spades-assemblies/contigs/
 └── SRR40095270.contigs.fasta
 ```
 
-Este directorio representa el punto donde las muestras dejan de analizarse de forma aislada y comienzan a integrarse en el análisis filogenómico.
+Aquí comienza la integración filogenómica.
 
 ---
 
-# 26. Buscar UCEs en todas las muestras
+# 25. Buscar UCEs en todas las muestras
 
-El pipeline ejecuta:
+PHYLUCE ejecuta:
 
 ```text
 phyluce_assembly_match_contigs_to_probes
 ```
 
-una sola vez sobre:
-
-```text
-out/global/spades-assemblies/contigs/
-```
+sobre todo el directorio de contigs.
 
 El resultado principal es:
 
@@ -1243,13 +1111,23 @@ El resultado principal es:
 out/global/uce-search/probe.matches.sqlite
 ```
 
-Esta base contiene los matches de **todas las muestras**.
+La base contiene:
+
+```text
+muestra
+  │
+  ▼
+contig
+  │
+  ▼
+locus UCE
+```
 
 ---
 
-# 27. Crear el conjunto de taxones automáticamente
+# 26. Crear el conjunto de taxones
 
-A partir de `samples.txt`, el pipeline genera:
+El script genera:
 
 ```text
 metadata/taxon-set-all.conf
@@ -1267,9 +1145,9 @@ SRR40095270
 
 ---
 
-# 28. Determinar qué loci están presentes
+# 27. Matriz muestra × locus
 
-El pipeline ejecuta:
+El script utiliza:
 
 ```text
 phyluce_assembly_get_match_counts
@@ -1281,37 +1159,38 @@ con:
 --incomplete-matrix
 ```
 
-para generar:
+Esto permite conservar loci aunque no estén presentes en todas las muestras.
+
+Conceptualmente:
+
+```text
+                uce-1   uce-2   uce-3
+
+SRR40095305       ✓       ✓       ✓
+SRR40095304       ✓       -       ✓
+SRR40095292       ✓       ✓       ✓
+SRR40095270       -       ✓       ✓
+```
+
+El resultado queda en:
 
 ```text
 out/global/loci/all-uce-loci.conf
 ```
 
-Este archivo representa la relación entre:
-
-```text
-muestras × loci UCE
-```
-
 ---
 
-# 29. Extraer todas las secuencias UCE
+# 28. Extraer todas las secuencias
 
-Después se ejecuta:
-
-```text
-phyluce_assembly_get_fastas_from_match_counts
-```
-
-para generar:
+PHYLUCE genera:
 
 ```text
 out/global/loci/all-uce-loci.fasta
 ```
 
-Este archivo es un **FASTA monolítico** que contiene secuencias de múltiples loci y múltiples muestras.
+Este archivo contiene muchas muestras y muchos loci.
 
-Por ejemplo:
+Ejemplo:
 
 ```text
 >uce-2413_SRR40095305
@@ -1327,68 +1206,63 @@ SECUENCIA...
 SECUENCIA...
 ```
 
-Todavía no es un único alineamiento.
-
-Contiene muchos loci diferentes.
+Todavía no es un alineamiento único.
 
 ---
 
-# 30. Separar y alinear por locus
+# 29. Separar y alinear por locus
 
-PHYLUCE utiliza:
+El script utiliza:
 
 ```text
 phyluce_align_seqcap_align
 ```
 
-para organizar las secuencias por locus y alinearlas.
+con MAFFT.
 
 Conceptualmente:
 
 ```text
 all-uce-loci.fasta
-        │
-        ├── uce-2413
-        │      ├── muestra 1
-        │      ├── muestra 2
-        │      ├── muestra 3
-        │      └── muestra 4
-        │             │
-        │             ▼
-        │           MAFFT
-        │             │
-        │             ▼
-        │      uce-2413.fasta
-        │
-        ├── uce-9410
-        │      ├── muestra 1
-        │      ├── muestra 2
-        │      └── muestra 4
-        │             │
-        │             ▼
-        │           MAFFT
-        │             │
-        │             ▼
-        │      uce-9410.fasta
-        │
-        └── ...
+       │
+       ├── uce-2413
+       │      ├── SRR40095305
+       │      ├── SRR40095304
+       │      ├── SRR40095292
+       │      └── SRR40095270
+       │               │
+       │               ▼
+       │             MAFFT
+       │               │
+       │               ▼
+       │      alineamiento uce-2413
+       │
+       ├── uce-9410
+       │      ├── SRR40095305
+       │      ├── SRR40095304
+       │      └── SRR40095270
+       │               │
+       │               ▼
+       │             MAFFT
+       │
+       └── ...
 ```
 
-El script usa:
+Usamos:
 
 ```text
 --incomplete-matrix
 ```
 
-porque no todos los loci necesariamente tienen datos de todas las muestras.
+porque algunos loci pueden faltar en algunas muestras.
 
-Además utiliza:
+También utilizamos:
 
 ```text
 --no-trim
 ```
 
-para que esta práctica separe claramente:
+para separar claramente:
 
 ```text
 alineamiento
@@ -1397,30 +1271,23 @@ alineamiento
 de:
 
 ```text
-trimming / filtrado
-```
-
-Así los archivos finales representan los alineamientos producidos por MAFFT sin aplicar el trimming automático de PHYLUCE.
-
-Si se desea utilizar el trimming automático de PHYLUCE, puede eliminarse:
-
-```text
---no-trim
+filtrado / trimming
 ```
 
 ---
 
-# 31. Resultados del pipeline global
+# 30. Resultados finales
 
-Los resultados principales se encuentran en:
+La salida tendrá una estructura semejante a:
 
 ```text
 out/global/
 ├── spades-assemblies/
 │   └── contigs/
-│       ├── muestra1.contigs.fasta
-│       ├── muestra2.contigs.fasta
-│       └── ...
+│       ├── SRR40095305.contigs.fasta
+│       ├── SRR40095304.contigs.fasta
+│       ├── SRR40095292.contigs.fasta
+│       └── SRR40095270.contigs.fasta
 │
 ├── uce-search/
 │   ├── probe.matches.sqlite
@@ -1428,154 +1295,199 @@ out/global/
 │
 ├── loci/
 │   ├── all-uce-loci.conf
-│   ├── all-uce-loci.fasta
-│   └── all-uce-loci.incomplete
+│   ├── all-uce-loci.incomplete
+│   └── all-uce-loci.fasta
 │
 └── alignments/
-    ├── uce-....fasta
-    ├── uce-....fasta
-    ├── uce-....fasta
+    ├── *.fasta
+    ├── *.fasta
     └── ...
 ```
 
+Cada FASTA de `alignments/` representa **un locus UCE alineado**.
+
 ---
 
-# 32. Revisar los alineamientos
+# 31. Revisar los alineamientos
 
-Contamos cuántos loci fueron alineados:
+Contamos:
 
 ```bash
 find out/global/alignments \
     -type f -name "*.fasta" | wc -l
 ```
 
-Podemos seleccionar uno:
+Revisamos algunos:
 
 ```bash
 find out/global/alignments \
     -type f -name "*.fasta" | head
 ```
 
-Y observarlo:
-
-```bash
-head out/global/alignments/ARCHIVO.fasta
-```
-
-En un locus recuperado para las cuatro muestras esperamos encontrar hasta cuatro secuencias:
+Cada archivo puede contener:
 
 ```text
-uce-X
+UCE-X
 ├── SRR40095305
 ├── SRR40095304
 ├── SRR40095292
 └── SRR40095270
 ```
 
+si ese locus fue recuperado para las cuatro muestras.
+
 ---
 
-# 33. ¿Qué hemos logrado?
+# 32. Utilizar el pipeline con muestras propias
 
-Al inicio teníamos:
+Para otro proyecto normalmente solo necesitamos modificar dos archivos.
 
-```text
-millones de reads cortos
+## `metadata/config.sh`
+
+Cambiar:
+
+```bash
+RAW_SOURCE_DIR="/ruta/a/mis_fastq"
+
+FASTP_CONTAINER="/ruta/fastp.sif"
+
+PHYLUCE_CONTAINER="/ruta/phyluce.sif"
+
+PROBES_SOURCE="/ruta/probes.fasta"
 ```
 
-Al final tenemos:
+## `metadata/samples.txt`
+
+Por ejemplo:
 
 ```text
-un conjunto de alineamientos homólogos
+taxon01
+taxon02
+taxon03
+taxon04
+taxon05
 ```
 
-donde cada archivo corresponde a una región UCE:
+Los FASTQ deberán llamarse:
 
 ```text
-uce-2413.fasta
-uce-9410.fasta
-uce-5435.fasta
+taxon01_1.fastq.gz
+taxon01_2.fastq.gz
+taxon02_1.fastq.gz
+taxon02_2.fastq.gz
 ...
 ```
 
-y cada alineamiento contiene las muestras en las que se recuperó ese locus.
+Después:
 
-Este es el punto de partida para etapas posteriores como:
+```bash
+sbatch bin/01_clean_reads.slurm
+```
 
-```text
-filtrado de alineamientos
-        │
-        ▼
-selección por completitud
-        │
-        ▼
-concatenación o análisis por loci
-        │
-        ▼
-inferencia filogenética
+y cuando termine:
+
+```bash
+sbatch bin/02_phyluce_all.slurm
 ```
 
 ---
 
-# 34. Resumen conceptual
+# 33. Recursos de Slurm
+
+Las rutas generales están en:
 
 ```text
-MUESTRA 1
-FASTQ → fastp → SPAdes → contigs
-                              │
-MUESTRA 2                     │
-FASTQ → fastp → SPAdes → contigs
-                              │
-MUESTRA 3                     ├──► PHYLUCE + probes
-FASTQ → fastp → SPAdes → contigs      │
-                              │        ▼
-MUESTRA 4                     │   probe.matches.sqlite
-FASTQ → fastp → SPAdes → contigs      │
-                                       ▼
-                              muestra × locus
-                                       │
-                                       ▼
-                              secuencias UCE
-                                       │
-                                       ▼
-                                    MAFFT
-                                       │
-                                       ▼
-                              alineamiento por UCE
+metadata/config.sh
+```
+
+Pero las directivas:
+
+```bash
+#SBATCH --partition
+#SBATCH --cpus-per-task
+#SBATCH --mem
+#SBATCH --time
+```
+
+permanecen dentro de los scripts porque Slurm las interpreta antes de que Bash ejecute:
+
+```bash
+source metadata/config.sh
+```
+
+Si se desea cambiar recursos sin editar el script:
+
+```bash
+sbatch \
+    --cpus-per-task=8 \
+    --mem=16G \
+    bin/02_phyluce_all.slurm
 ```
 
 ---
 
-# 35. Archivos incluidos
+# Resumen final
+
+## Parte I
 
 ```text
-README.md
-metadata/samples.txt
-bin/01_clean_reads.slurm
-bin/02_phyluce_all.slurm
+UNA MUESTRA
+
+FASTQ
+  │
+  ▼
+fastp
+  │
+  ▼
+reads limpios
+  │
+  ▼
+SPAdes
+  │
+  ▼
+contigs
+  │
+  ▼
+probes + LASTZ
+  │
+  ▼
+UCEs
 ```
 
-Para utilizar otras muestras, en la mayoría de los casos basta con modificar:
+## Parte II
 
 ```text
-metadata/samples.txt
-```
+TODAS LAS MUESTRAS
 
-y colocar los FASTQ correspondientes en:
-
-```text
-data/raw-fastq/
-```
-
-El nombre incluido en `samples.txt` debe coincidir con el prefijo de los archivos:
-
-```text
-ID_1.fastq.gz
-ID_2.fastq.gz
+config.sh
+   +
+samples.txt
+   │
+   ▼
+01_clean_reads.slurm
+   │
+   ▼
+reads limpios
+   │
+   ▼
+02_phyluce_all.slurm
+   │
+   ├── SPAdes por muestra
+   ├── contigs
+   ├── probes + LASTZ
+   ├── probe.matches.sqlite
+   ├── matriz muestra × locus
+   ├── extracción de UCEs
+   └── MAFFT por locus
+   │
+   ▼
+alineamientos UCE
 ```
 
 ---
 
-# Referencias
+# Referencia
 
-- PHYLUCE 1.6.8 documentation: https://phyluce.readthedocs.io/en/v1.6.8/
-- UCE processing: https://phyluce.readthedocs.io/en/v1.6.8/uce-processing.html
+PHYLUCE 1.6.8:
+
+https://phyluce.readthedocs.io/en/v1.6.8/
