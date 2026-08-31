@@ -880,6 +880,8 @@ secuencias UCE
 alineamiento por locus
 ```
 
+![](img/phyluce_1.png)
+
 ---
 
 # 18. Crear el proyecto global
@@ -985,6 +987,8 @@ RAW_SOURCE_DIR
 ```
 
 Para otro proyecto basta con sustituir esta lista.
+
+![](img/phyluce_2.png)
 
 ---
 
@@ -1137,6 +1141,8 @@ contig
 locus UCE
 ```
 
+![](img/phyluce_3.png)
+
 ---
 
 # 26. Crear el conjunto de taxones
@@ -1192,6 +1198,8 @@ El resultado queda en:
 out/global/loci/all-uce-loci.conf
 ```
 
+![](img/phyluce_4.png)
+
 ---
 
 # 28. Extraer todas las secuencias
@@ -1221,6 +1229,8 @@ SECUENCIA...
 ```
 
 Todavía no es un alineamiento único.
+
+![](img/phyluce_5.png)
 
 ---
 
@@ -1276,17 +1286,10 @@ También utilizamos:
 --no-trim
 ```
 
-para separar claramente:
+conserva el alineamiento generado por MAFFT sin eliminar posiciones
 
-```text
-alineamiento
-```
 
-de:
-
-```text
-filtrado / trimming
-```
+![](img/phyluce_6.png)
 
 ---
 
@@ -1319,6 +1322,8 @@ out/global/
 ```
 
 Cada FASTA de `alignments/` representa **un locus UCE alineado**.
+
+![](img/phyluce_7.png)
 
 ---
 
