@@ -143,26 +143,40 @@ Esta primera parte se realiza con **una sola muestra** para observar claramente 
 
 ---
 
-# 1. Crear el proyecto
+# 1. Clonar el repositorio de la práctica
+
+Clonaremos el repositorio que contiene los archivos necesarios para la práctica:
 
 ```bash
-mkdir -p phyluce_uce/{data/raw-fastq,data/clean-fastq,data/probes,out,bin,metadata,logs}
-
-cd phyluce_uce
+git clone git@github.com:cristoichkov/clase_phyluce-.git
 ```
 
-La estructura será:
+Entramos al directorio del proyecto:
+
+```bash
+cd clase_phyluce-
+```
+
+Revisamos su contenido:
+
+```bash
+ls
+```
+
+El repositorio contiene los archivos de configuración, los scripts y la documentación de la práctica.
+
+Durante el análisis se utilizarán además los directorios:
 
 ```text
-phyluce_uce/
-├── data/
-│   ├── raw-fastq/
-│   ├── clean-fastq/
-│   └── probes/
-├── out/
-├── bin/
-├── metadata/
-└── logs/
+data/
+out/
+logs/
+```
+
+Si todavía no existen, pueden crearse con:
+
+```bash
+mkdir -p data/{raw-fastq,clean-fastq,probes} out logs
 ```
 
 ---
